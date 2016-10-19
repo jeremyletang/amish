@@ -22,3 +22,10 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+# binaries
+amish
+amish_linux_amd64
+
+# conf
+.amish.conf.json
