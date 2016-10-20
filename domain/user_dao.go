@@ -34,6 +34,12 @@ func (ud *UserDao) GetById(id string) (*User, error) {
 	return model, ud.db.First(model).Error
 }
 
+func (ud *UserDao) GetByIds(ids []string) ([]*User, error) {
+	model := []*User{}
+	return model, ud.db.Where("users.id in (?)", ids).
+		Find(&model).Error
+}
+
 func (ud *UserDao) GetOrCreate(model *User) (*User, error) {
 	u, err := ud.GetById(model.Id)
 	if err != nil {

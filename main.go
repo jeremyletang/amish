@@ -18,6 +18,7 @@ import (
 	"github.com/jeremyletang/amish/conf"
 	"github.com/jeremyletang/amish/domain"
 	"github.com/jeremyletang/amish/gmail"
+	"github.com/jeremyletang/amish/slack"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 )
@@ -84,9 +85,13 @@ func main() {
 	}
 	defer db.Close()
 
-	// init gmail service
-	gmail.InitGmailService(config)
-	gmail.SendMail()
+	if config.UseGmail {
+		// init gmail service
+		gmail.InitGmailService(config)
+		gmail.SendMail()
+	}
+
+	slack.InitSlack(config)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, os.Kill)
@@ -212,7 +217,7 @@ func repositoryChecker(repository *domain.Repository, conf conf.Conf) {
 		repository.Owner, repository.Name, conf.Refresh)
 	refreshTicker := time.NewTicker(refreshRate).C
 	// start it at least one time
-	go updateRepositoryStargazers(repository)
+	go updateRepositoryStargazers(repository, conf.Slack.Channels)
 
 	wg.Add(1)
 	for {
@@ -220,7 +225,7 @@ func repositoryChecker(repository *domain.Repository, conf conf.Conf) {
 		case <-refreshTicker:
 			log.Infof("[repositoryChecker] (%s/%s) starting update",
 				repository.Owner, repository.Name)
-			go updateRepositoryStargazers(repository)
+			go updateRepositoryStargazers(repository, conf.Slack.Channels)
 		case v := <-quit:
 			quit <- v
 			wg.Done()
@@ -252,10 +257,12 @@ func listenerNotifier(listener string, conf conf.Conf) {
 	}
 }
 
-func addUsersAndStarsToRepository(repository *domain.Repository, stargazers []*github.Stargazer) {
+func addUsersAndStarsToRepository(repository *domain.Repository, stargazers []*github.Stargazer, channels []string) {
 	userDao := domain.NewUserDao(db)
 	starDao := domain.NewStarDao(db)
 	userIds := []string{}
+	newStars := []*domain.User{}
+
 	for _, gazer := range stargazers {
 		// first create user if not exists
 		u, err := userDao.GetById(strconv.Itoa(*(gazer.User.ID)))
@@ -275,15 +282,35 @@ func addUsersAndStarsToRepository(repository *domain.Repository, stargazers []*g
 			Valid:        1,
 		}
 
-		starDao.CreateIfNotExists(&star)
+		if b, _ := starDao.CreateIfNotExists(&star); b {
+			newStars = append(newStars, u)
+		}
+	}
+
+	if len(newStars) != 0 {
+		slack.Notify(slack.Star, newStars, repository, channels)
 	}
 
 	// set all other as invalid
 	toInvalidateList, _ := starDao.NotOneOfUsers(repository.Id, userIds)
 	starDao.SetInvalids(toInvalidateList)
+
+	removedStars := GetUserFromStars(toInvalidateList)
+	// slack notify unstar
+	slack.Notify(slack.UnStar, removedStars, repository, channels)
 }
 
-func updateRepositoryStargazers(repository *domain.Repository) {
+func GetUserFromStars(stars []domain.Star) []*domain.User {
+	ids := []string{}
+	for _, s := range stars {
+		ids = append(ids, s.UserId)
+	}
+	userDao := domain.NewUserDao(db)
+	users, _ := userDao.GetByIds(ids)
+	return users
+}
+
+func updateRepositoryStargazers(repository *domain.Repository, channels []string) {
 	perPage := 100
 	results := []*github.Stargazer{}
 	lo := github.ListOptions{Page: 1, PerPage: perPage}
@@ -299,7 +326,7 @@ func updateRepositoryStargazers(repository *domain.Repository) {
 		lo.Page += 1
 	}
 
-	addUsersAndStarsToRepository(repository, results)
+	addUsersAndStarsToRepository(repository, results, channels)
 	updateUserBase <- struct{}{}
 
 	log.Infof("[updateRepositoryStargazers] (%s/%s) update finished",

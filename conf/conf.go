@@ -21,6 +21,11 @@ type Gmail struct {
 	URL          string `json:"url"`
 }
 
+type Slack struct {
+	Token    string   `json:"token"`
+	Channels []string `json:"channels"`
+}
+
 type Conf struct {
 	Github    Github   `json:"github"`
 	Mysql     Mysql    `json:"mysql"`
@@ -28,6 +33,8 @@ type Conf struct {
 	Refresh   string   `json:"refresh"`
 	Notify    string   `json:"notify"`
 	Listeners []string `json:"listeners"`
+	UseGmail  bool     `json:"use_gmail"`
+	Slack     Slack    `json:"slack"`
 }
 
 const Seelog = `

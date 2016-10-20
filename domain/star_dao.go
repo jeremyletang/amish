@@ -58,21 +58,22 @@ func (sd *StarDao) Create(model *Star) error {
 	return sd.db.Create(model).Error
 }
 
-func (sd *StarDao) CreateIfNotExists(model *Star) error {
+func (sd *StarDao) CreateIfNotExists(model *Star) (bool, error) {
 	old := Star{}
 	err := sd.db.Where("stars.repository_id = ?", model.RepositoryId).
 		Where("stars.user_id = ?", model.UserId).
 		First(&old).Error
 	if err != nil {
-		return sd.Create(model)
+		return true, sd.Create(model)
 	} else {
 		// if old was unstar, re star id
 		if old.Valid == 0 {
 			old.Valid = 1
 			sd.Update(&old)
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func (sd *StarDao) Update(model *Star) error {
